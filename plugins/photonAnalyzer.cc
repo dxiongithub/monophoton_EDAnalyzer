@@ -71,6 +71,8 @@ now getting everything
 #include "DataFormats/PatCandidates/interface/Electron.h"
 #include "DataFormats/VertexReco/interface/Vertex.h"
 
+#include "DataFormats/METReco/interface/BeamHaloSummary.h"
+
 #include "DataFormats/HepMCCandidate/interface/GenParticle.h"
 
 #include "TTree.h"
@@ -117,6 +119,7 @@ class photonAnalyzer : public edm::one::EDAnalyzer<edm::one::SharedResources>  {
         //void branchEvents         (TTree*);
         void branchTracks         (TTree*);
         //void branchGenInfo        (TTree*);
+        void branchBeamHaloMuon   (TTree*);
         
 
 
@@ -131,6 +134,7 @@ class photonAnalyzer : public edm::one::EDAnalyzer<edm::one::SharedResources>  {
         //void fillEvents       (const edm::Event&, const edm::EventSetup&);
         void fillTracks       (const edm::Event&, const edm::EventSetup&);
         //void fillGenInfo      (const edm::Event&, const edm::EventSetup&);
+        void fillBeamHaloMuon (const edm::Event&, const edm::EventSetup&);
 
         // ----------member data ---------------------------
         edm::EDGetTokenT<edm::View<pat::Photon> >           photonCollection_;
@@ -150,6 +154,7 @@ class photonAnalyzer : public edm::one::EDAnalyzer<edm::one::SharedResources>  {
         bool doGenParticles_;
         bool addFilterInfoMINIAOD_;
         //edm::EDGetTokenT<std::vector<reco::GenParticle> >   genParticlesCollection_;
+        edm::EDGetTokenT<reco::BeamHaloSummary>             beamHaloSummaryToken_;
         
 
         static bool vtxSort( const reco::Vertex &  a, const reco::Vertex & b );
@@ -172,6 +177,7 @@ class photonAnalyzer : public edm::one::EDAnalyzer<edm::one::SharedResources>  {
         vector<float>       phoSeedTime_;
         vector<float>       phoSeedEnergy_;
         vector<float>       phoMIPTotEnergy_;
+        vector<float>       phoCalibEt_;
         
 
         //photon isolation
@@ -217,6 +223,7 @@ class photonAnalyzer : public edm::one::EDAnalyzer<edm::one::SharedResources>  {
         vector<float>       ophoSeedTime_;
         vector<float>       ophoSeedEnergy_;
         vector<float>       ophoMIPTotEnergy_;
+        vector<float>       ophoCalibEt_;
         
 
         //ophoton mva variables
@@ -301,6 +308,11 @@ class photonAnalyzer : public edm::one::EDAnalyzer<edm::one::SharedResources>  {
         vector<float> trackPt_;
         vector<float> trackEta_;
         vector<float> trackPhi_;
+
+
+        //beamhalomuon
+        Int_t            nBHmuon_;
+        vector<UShort_t> BHIDbit_;
 /*
         //genInfo
         Int_t            nMC_;
@@ -311,6 +323,16 @@ class photonAnalyzer : public edm::one::EDAnalyzer<edm::one::SharedResources>  {
         vector<float>    mcPhi;
         vector<float>    mcEt;
         vector<int>      mcStatus;
+
+
+        Int_t            ngenPho_;
+        vector<float>    genPhoPt;
+        vector<float>    genPhoMass;
+        vector<float>    genPhoEta;
+        vector<float>    genPhoPhi;
+        vector<float>    genPhoEt;
+        vector<int>      genPhoStatus;
+
 
         vector<int>     newparticles_;
         bool runOnParticleGun_;
@@ -354,12 +376,14 @@ photonAnalyzer::photonAnalyzer(const edm::ParameterSet& ps):
     vtxLabel_(consumes<std::vector<reco::Vertex>>               (ps.getParameter<edm::InputTag>("vertices"))),
     rhoLabel_(consumes<double>                                  (ps.getParameter<edm::InputTag>("rhoLabel"))),
     tracklabel_(consumes<std::vector<pat::PackedCandidate>>     (ps.getParameter<edm::InputTag>("tracks"))),
-    doGenParticles_                                             (ps.getParameter<bool>("genparticles")),
+    //doGenParticles_                                             (ps.getParameter<bool>("genparticles")),
     addFilterInfoMINIAOD_                                       (ps.getParameter<bool>("miniaodinfo")),
+    beamHaloSummaryToken_(consumes<reco::BeamHaloSummary>       (ps.getParameter<edm::InputTag>("beamhalomuon"))),
     //genParticlesCollection_(consumes<std::vector<reco::GenParticle>> (ps.getParameter<edm::InputTag>("genParticleSrc"))),
     year_                                                       (ps.getParameter<int>("year"))
     //newparticles_                                               (ps.getParameter<std::vector<int>>("newParticles")),
     //runOnParticleGun_                                           (ps.getParameter<bool>("runOnParticleGun"))
+
 {
     //now do what ever initialization is needed
     
@@ -376,6 +400,7 @@ photonAnalyzer::photonAnalyzer(const edm::ParameterSet& ps):
     branchVertices(tree_);
     branchTracks(tree_);
     //branchGenInfo(tree_);
+    branchBeamHaloMuon(tree_);
 
 }
 
@@ -423,6 +448,7 @@ void photonAnalyzer::branchPhotons(TTree* tree)
     tree->Branch("phoSeedTime",             &phoSeedTime_);
     tree->Branch("phoSeedEnergy",           &phoSeedEnergy_);
     tree->Branch("phoMIPTotEnergy",         &phoMIPTotEnergy_);
+    tree->Branch("phoCalibEt",              &phoCalibEt_);
 
 
     tree->Branch("phoPFChIso",              &phoPFChIso_);
@@ -472,6 +498,7 @@ void photonAnalyzer::fillPhotons(const edm::Event& e, const edm::EventSetup& es)
     phoSeedTime_        .clear();
     phoSeedEnergy_      .clear();
     phoMIPTotEnergy_    .clear(); 
+    phoCalibEt_         .clear();
 
 
     phoPFChIso_         .clear();
@@ -480,6 +507,7 @@ void photonAnalyzer::fillPhotons(const edm::Event& e, const edm::EventSetup& es)
     phoPFNeuIso_        .clear();
     phoPFChWorstVetoIso_.clear();
     phoPFChWorstIso_    .clear();
+    
 
    
     phoIDMVA_               .clear();
@@ -558,7 +586,7 @@ void photonAnalyzer::fillPhotons(const edm::Event& e, const edm::EventSetup& es)
 
         phoMIPTotEnergy_         .push_back(iPho->mipTotEnergy());
 
-
+        phoCalibEt_       .push_back(iPho->et()*iPho->userFloat("ecalEnergyPostCorr")/iPho->energy());
         phoIDMVA_           .push_back(iPho->userFloat("PhotonMVAEstimatorRunIIFall17v2Values"));  
         phoHoverE_          .push_back(iPho->hadTowOverEm());
         phoTrkSumPtHollowConeDR03_ .push_back(iPho->trkSumPtHollowConeDR03());  
@@ -606,6 +634,7 @@ void photonAnalyzer::branchOOTPhotons(TTree* tree)
     tree->Branch("ophoSeedTime",             &ophoSeedTime_);
     tree->Branch("ophoSeedEnergy",           &ophoSeedEnergy_);
     tree->Branch("ophoMIPTotEnergy",         &ophoMIPTotEnergy_);
+    tree->Branch("ophoCalibEt",              &ophoCalibEt_);
 
 
     tree->Branch("ophoHoverE",               &ophoHoverE_);
@@ -645,8 +674,8 @@ void photonAnalyzer::fillOOTPhotons(const edm::Event& e, const edm::EventSetup& 
     ophoR9_              .clear();
     ophoSeedTime_        .clear();
     ophoSeedEnergy_      .clear();
-    ophoMIPTotEnergy_    .clear(); 
-
+    ophoMIPTotEnergy_    .clear();  
+    ophoCalibEt_         .clear();
    
 
     ophoHoverE_                 .clear();
@@ -712,7 +741,7 @@ void photonAnalyzer::fillOOTPhotons(const edm::Event& e, const edm::EventSetup& 
         }
 
         ophoMIPTotEnergy_         .push_back(oPho->mipTotEnergy());
-
+        //ophoCalibEt_              .push_back(oPho->et()*oPho->userFloat("ecalEnergyPostCorr")/oPho->energy());
 
         ophoHoverE_          .push_back(oPho->hadTowOverEm());
         ophoTrkSumPtHollowConeDR03_ .push_back(oPho->trkSumPtHollowConeDR03());  
@@ -1107,7 +1136,7 @@ void photonAnalyzer::fillVertices(const edm::Event& e, const edm::EventSetup& es
     vtx_xError_.push_back(vtx_sorted.begin()->xError());
     vtx_yError_.push_back(vtx_sorted.begin()->yError());
     vtx_zError_.push_back(vtx_sorted.begin()->zError());
-    nVtx_++;
+    nVtx_ = vtx_sorted.size();
 
 
     edm::Handle<double> rhoHandle;
@@ -1120,31 +1149,6 @@ void photonAnalyzer::fillVertices(const edm::Event& e, const edm::EventSetup& es
     rho_    = *(rhoHandle.product());
 }
 
-/*
-void photonAnalyzer::branchEvents(TTree* tree)
-{
-    tree->Branch("run",     &run_);
-    tree->Branch("event",   &event_);
-    tree->Branch("lumis",   &lumis_);
-    tree->Branch("rho",     &rho_);
-}
-
-void photonAnalyzer::fillEvents(const edm::Event& e, const edm::EventSetup& es) 
-{
-    using namespace edm;
-    using namespace std;
-    
-    edm::Handle<double> rhoHandle;
-    e.getByToken(rhoLabel_, rhoHandle);
-
-    run_    = e.id().run();
-    event_  = e.id().event();
-    lumis_  = e.luminosityBlock();
-
-    rho_    = *(rhoHandle.product());
-
-}
-*/
 
 void photonAnalyzer::branchTracks(TTree* tree)
 {
@@ -1209,82 +1213,49 @@ void photonAnalyzer::fillTracks(const edm::Event& e, const edm::EventSetup& es)
         }
     }
 }
-/*
-void photonAnalyzer::branchGenInfo(TTree* tree)
+
+
+void photonAnalyzer::branchBeamHaloMuon(TTree* tree)
 {
-    tree->Branch("nMC",          &nMC_);
-    tree->Branch("mcPID",        &mcPID);
-    tree->Branch("mcPt",         &mcPt);
-    tree->Branch("mcMass",       &mcMass);
-    tree->Branch("mcEta",        &mcEta);
-    tree->Branch("mcPhi",        &mcPhi);
-    tree->Branch("mcEt",         &mcEt);
-    tree->Branch("mcStatus",     &mcStatus);
+    tree->Branch("nBHmuon",       &nBHmuon_);
+    tree->Branch("BHIDbit",       &BHIDbit_);
 }
 
-void photonAnalyzer::fillGenInfo(const edm::Event& e, const edm::EventSetup& es) 
+void photonAnalyzer::fillBeamHaloMuon(const edm::Event& e, const edm::EventSetup& es)
 {
-    mcPID       .clear();
-    mcPt        .clear();
-    mcMass      .clear();
-    mcEta       .clear();
-    mcPhi       .clear();
-    mcEt        .clear();
-    mcStatus    .clear();
+    BHIDbit_ .clear();
 
-    nMC_ = 0;
+    nBHmuon_ = 0;
 
-    edm::Handle<vector<reco::GenParticle> > genParticlesHandle;
-    e.getByToken(genParticlesCollection_, genParticlesHandle);
+    edm::Handle<reco::BeamHaloSummary> beamHaloSummaryHandle;
+    e.getByToken(beamHaloSummaryToken_, beamHaloSummaryHandle);
 
+    UShort_t tmpBHIDbit = 0; 
 
-    for (vector<reco::GenParticle>::const_iterator ip = genParticlesHandle->begin(); ip != genParticlesHandle->end(); ++ip) 
+    if(beamHaloSummaryHandle.isValid())
     {
-        int status = ip->status();
+        if(beamHaloSummaryHandle->CSCLooseHaloId()) setbit(tmpBHIDbit, 0);
+        if(beamHaloSummaryHandle->CSCTightHaloId()) setbit(tmpBHIDbit, 1);
+        if(beamHaloSummaryHandle->CSCTightHaloId2015()) setbit(tmpBHIDbit, 2);
+        if(beamHaloSummaryHandle->CSCTightHaloIdTrkMuUnveto()) setbit(tmpBHIDbit, 3);
+        if(beamHaloSummaryHandle->EcalLooseHaloId()) setbit(tmpBHIDbit, 4);
+        if(beamHaloSummaryHandle->EcalTightHaloId()) setbit(tmpBHIDbit, 5);
+        if(beamHaloSummaryHandle->EventSmellsLikeHalo()) setbit(tmpBHIDbit, 6);
+        if(beamHaloSummaryHandle->ExtremeTightId()) setbit(tmpBHIDbit, 7);
+        if(beamHaloSummaryHandle->GlobalLooseHaloId()) setbit(tmpBHIDbit, 8);
+        if(beamHaloSummaryHandle->GlobalSuperTightHaloId2016()) setbit(tmpBHIDbit, 9);
+        if(beamHaloSummaryHandle->GlobalTightHaloId()) setbit(tmpBHIDbit, 10);
+        if(beamHaloSummaryHandle->GlobalTightHaloId2016()) setbit(tmpBHIDbit, 11);
+        if(beamHaloSummaryHandle->HcalLooseHaloId()) setbit(tmpBHIDbit, 12);
+        if(beamHaloSummaryHandle->HcalTightHaloId()) setbit(tmpBHIDbit, 13);
+        if(beamHaloSummaryHandle->LooseId()) setbit(tmpBHIDbit, 14);
+        if(beamHaloSummaryHandle->TightId()) setbit(tmpBHIDbit, 15);
 
-        // keep non-FSR photons with pT > 5.0 and all leptons with pT > 3.0;
-        bool photonOrLepton =
-        (ip->pdgId() == 22 && (ip->isPromptFinalState() || ip->isLastCopy())) ||
-        (status == 1 && abs(ip->pdgId()) == 11 && (ip->isPromptFinalState() || ip->isLastCopy())) || 
-        (status == 1 && abs(ip->pdgId()) == 13 && (ip->isPromptFinalState() || ip->isLastCopy())) ||
-        (status == 1 && (abs(ip->pdgId()) == 12 || abs(ip->pdgId()) == 14 || abs(ip->pdgId()) == 16)) ||
-        (status == 1 && ( abs(ip->pdgId()) >= 11 && abs(ip->pdgId()) <= 16 ) && ip->pt() > 3.0)  ||
-        (status < 10 && abs(ip->pdgId()) == 15 && ip->pt() > 3.0);
-        
-        // select also Z, W, H, top and b 
-        bool heavyParticle =
-        ((    ip->pdgId()  == 23 && ip->isHardProcess()) || 
-        (abs(ip->pdgId()) == 24 && ip->isHardProcess()) || 
-        (    ip->pdgId()  == 25 && ip->isHardProcess()) ||
-        (abs(ip->pdgId()) ==  6 && ip->isHardProcess()) || 
-        (abs(ip->pdgId()) ==  5 && ip->isHardProcess()));
-        
-        bool newParticle = false;
-        for (size_t inp = 0; inp < newparticles_.size(); ++inp) {
-        if (abs(ip->pdgId()) == newparticles_[inp]) newParticle = true;
-        }
-        
-        //if ( heavyParticle || photonOrLepton || quarks || newParticle ) {
-        if ( heavyParticle || photonOrLepton || newParticle ) {
-        
-            const reco::Candidate *p = (const reco::Candidate*)&(*ip);
-            if (!runOnParticleGun_ && !p->mother()) continue;
+        BHIDbit_.push_back(tmpBHIDbit);
 
-            mcPID    .push_back(p->pdgId());
-            mcPt     .push_back(p->pt());
-            mcMass   .push_back(p->mass());
-            mcEta    .push_back(p->eta());
-            mcPhi    .push_back(p->phi());
-            mcEt     .push_back(p->et());
-            mcStatus .push_back(p->status());
-        }
-
-        nMC_++;
+        nBHmuon_++;
     }
 }
-*/
-
-
 //
 // member functions
 //
@@ -1304,6 +1275,7 @@ photonAnalyzer::analyze(const edm::Event& e, const edm::EventSetup& es)
     //fillEvents(e, es);
     fillTracks(e, es);
     //fillGenInfo(e, es);
+    fillBeamHaloMuon(e,es);
 
     tree_->Fill();
     
@@ -1344,3 +1316,11 @@ photonAnalyzer::fillDescriptions(edm::ConfigurationDescriptions& descriptions) {
 
 //define this as a plug-in
 DEFINE_FWK_MODULE(photonAnalyzer);
+
+
+
+/******** log *********
+06232021 added beamhalomuon information for getting beamhalo from muon info
+reference: https://mattermost.web.cern.ch/cms-ntgc-metg/messages/@shilpi
+
+*/
